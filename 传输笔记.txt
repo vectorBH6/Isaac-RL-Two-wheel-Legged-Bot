@@ -1,0 +1,50 @@
+export PYTHONPATH=$PWD/scripts/co_rl:$PYTHONPATH
+
+python -m scripts.co_rl.train \
+    --task Isaac-Velocity-Flat-Flamingo-v1-ppo \
+    --algo ppo \
+    --num_envs 4096 \
+    --headless \
+    --num_policy_stacks 2 \
+    --num_critic_stacks 2
+
+
+
+
+python -m scripts.co_rl.train \
+    --task Isaac-TrackJUMP-Flat-Flamingo-v1-ppo \
+    --algo ppo \
+    --num_envs 4096 \
+    --headless \
+    --num_policy_stacks 2 \
+    --num_critic_stacks 2
+
+python -m scripts.co_rl.train \
+    --task Isaac-TrackJUMP-Flat-Flamingo-v1-ppo \
+    --algo ppo \
+    --num_envs 4096 \
+    --headless \
+    --num_policy_stacks 2 \
+    --num_critic_stacks 2 \
+    --resume True \
+    --load_run 2026-01-14_15-20-40 \
+    --checkpoint model_700.pt
+
+
+python -m scripts.co_rl.play \
+    --task Isaac-TrackJUMP-Flat-Flamingo-v1-ppo \
+    --algo ppo \
+    --num_envs 8 \
+    --num_policy_stacks 2 \
+    --num_critic_stacks 2 \
+    --load_run 2026-01-14_16-53-22 \
+    --checkpoint model_1400.pt \
+    --plot True
+    
+    
+    
+    
+    
+    
+    
+

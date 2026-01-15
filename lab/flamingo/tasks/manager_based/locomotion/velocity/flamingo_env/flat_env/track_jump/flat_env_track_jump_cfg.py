@@ -22,7 +22,7 @@ from lab.flamingo.assets.flamingo.flamingo_rev01_5_2 import FLAMINGO_CFG  # isor
 class FlamingocommandsCfg(CommandsCfg):
     event = mdp.EventCommandCfg(
         asset_name="robot",
-        resampling_time_range=(3.0, 5.0),
+        resampling_time_range=(7.0, 8.0),
         rel_standing_envs=0.1,
         event_during_time=1.2,
         debug_vis=True,
@@ -74,10 +74,43 @@ class FlamingoRewardsCfg():
         }
     )
 
+    leg_retraction_event = RewTerm(
+        func=mdp_jump.leg_retraction_event,
+        weight=15.0,
+        params={
+            "event_command_name": "event",
+            "event_time_range": (0.3, 0.8),
+            "asset_cfg": SceneEntityCfg("robot"),
+        }
+    )
+
+    # 跳跃成功完成奖励（重要！）
+    jump_complete_event = RewTerm(
+        func=mdp_jump.RewardCompleteEvent,
+        weight=1.0,  
+        params={
+            "event_command_name": "event",
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_wheel_link"),
+        }
+    )
+
     wheel_action_zero_event = RewTerm(func=mdp_jump.wheel_action_zero_event, weight=-0.01)
 
+    # 不跳跃惩罚（强制跳跃）
+    no_jump_penalty = RewTerm(
+        func=mdp_jump.penalty_no_jump_event,
+        weight=-20.0,  
+        params={
+            "event_command_name": "event",
+            "event_time_range": (0.3, 0.8),
+            "min_jump_height": 0.55,
+            "asset_cfg": SceneEntityCfg("robot"),
+        }
+    )
+
     # -- Penalites
-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-500.0)
+    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-100.0)
 
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_link_l2, weight=-0.05)
 
@@ -166,6 +199,8 @@ class FlamingoFlatEnvCfg(LocomotionVelocityFlatEnvCfg):
         self.observations.none_stack_critic.base_height_scan = None
         self.observations.none_stack_critic.left_wheel_height_scan = None
         self.observations.none_stack_critic.right_wheel_height_scan = None
+        self.observations.none_stack_critic.height_scan = None
+        self.observations.none_stack_critic.lift_mask = None
         #! ********************************************************* !#
 
         # observations
@@ -223,9 +258,9 @@ class FlamingoFlatEnvCfg(LocomotionVelocityFlatEnvCfg):
         # terminations
         self.terminations.base_contact.params["sensor_cfg"].body_names = [
             "base_link",
-            ".*_hip_link",
-            ".*_shoulder_link",
-            ".*_leg_link",
+            #".*_hip_link",
+            #".*_shoulder_link",
+            #".*_leg_link",
         ]
 
 
@@ -241,6 +276,10 @@ class FlamingoFlatEnvCfg_PLAY(FlamingoFlatEnvCfg):
 
         # scene
         self.scene.robot = FLAMINGO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+        self.commands.event.resampling_time_range = (5.0, 6.0)  # 5-6秒跳一次
+        self.commands.event.rel_standing_envs = 0.0             # 所有环境都跳
+        self.commands.event.event_during_time = 1.2             # 跳跃持续1.2秒
 
         # observations
         #! ****************** Observations setup ******************* !#
@@ -287,7 +326,7 @@ class FlamingoFlatEnvCfg_PLAY(FlamingoFlatEnvCfg):
         # terminations
         self.terminations.base_contact.params["sensor_cfg"].body_names = [
             "base_link",
-            ".*_hip_link",
-            ".*_shoulder_link",
-            ".*_leg_link",
+            #".*_hip_link",
+            #".*_shoulder_link",
+            #".*_leg_link",
         ]

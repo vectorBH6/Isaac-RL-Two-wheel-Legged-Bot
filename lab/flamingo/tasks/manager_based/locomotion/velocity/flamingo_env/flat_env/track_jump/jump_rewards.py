@@ -314,3 +314,75 @@ def over_height(
     event_command = env.command_manager.get_command(event_command_name)
 
     return penalty * event_command[:,0]
+
+def penalty_no_jump_event(
+    env: ManagerBasedRLEnv,
+    event_command_name: str = "event",
+    event_time_range: tuple = (0.3, 0.8),
+    min_jump_height: float = 0.55,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """惩罚在跳跃窗口期间没有跳跃的行为
+    
+    如果event激活且在跳跃时间窗口，但机器人高度不够，就给予惩罚
+    """
+    event_command = env.command_manager.get_command(event_command_name)
+    event_time = event_command[:, 1]
+    event_active = event_command[:, 0]
+    
+    asset: RigidObject = env.scene[asset_cfg.name]
+    current_height = asset.data.root_pos_w[:, 2]
+    
+    # 在跳跃窗口内
+    in_jump_window = torch.logical_and(
+        event_time >= event_time_range[0], 
+        event_time <= event_time_range[1]
+    ).float()
+    
+    # 没有跳到足够高度
+    not_jumping = (current_height < min_jump_height).float()
+    
+    # 惩罚：event激活 + 在窗口内 + 没跳
+    penalty = event_active * in_jump_window * not_jumping
+    
+    return penalty
+
+def leg_retraction_event(
+    env: ManagerBasedRLEnv,
+    event_command_name: str = "event",
+    event_time_range: tuple = (0.3, 0.8),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """跳跃时双腿回收奖励（类似收腹跳）
+    
+    在跳跃阶段，奖励轮子（腿）相对基座的垂直距离减小，即收腿动作。
+    """
+    
+    event_command = env.command_manager.get_command(event_command_name)
+    event_time = event_command[:, 1]
+    
+    asset: Articulation = env.scene[asset_cfg.name]
+    pos = asset.data.body_pos_w
+    
+    # 获取基座和轮子的位置
+    base_id = asset.find_bodies("base_link")[0]
+    wheel_ids = asset.find_bodies(".*wheel_link")[0]
+    
+    base_z = pos[:, base_id, 2].squeeze(-1)  # shape: (N,) - 添加squeeze以确保形状正确
+    wheel_z = pos[:, wheel_ids, 2]  # shape: (N, 2)
+    
+    # 计算轮子相对于基座的垂直距离（收腿时这个值应该减小）
+    height_diff = base_z.unsqueeze(-1) - wheel_z  # shape: (N, 2)
+    avg_height_diff = height_diff.mean(dim=1)  # shape: (N,)
+    
+    # 跳跃阶段判断
+    jump_phase = torch.logical_and(
+        event_time >= event_time_range[0], 
+        event_time <= event_time_range[1]
+    ).float()
+    
+    # 奖励较小的高度差（即收腿），使用负高度差作为奖励
+    # 目标：height_diff 越小越好（收腿）
+    reward = -avg_height_diff * jump_phase * event_command[:, 0]
+    
+    return reward
