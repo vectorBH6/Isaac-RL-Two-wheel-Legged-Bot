@@ -1,0 +1,280 @@
+--- git status ---
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add/rm <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	deleted:    lab/flamingo/assets/data/Robots/Flamingo/flamingo_rev01_5_2/flamingo_rev01_5_2_merge_joints.zip
+	modified:   lab/flamingo/tasks/manager_based/locomotion/position/mdp/terminations.py
+	modified:   lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/agents/co_rl_cfg.py
+	modified:   lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/flat_env_track_jump_cfg.py
+	modified:   lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/jump_rewards.py
+	modified:   lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/velocity_env_cfg.py
+	modified:   lab/flamingo/tasks/manager_based/locomotion/velocity/mdp/terminations.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	lab/flamingo/assets/data/Robots/Flamingo/flamingo_rev01_5_2/1/
+	lab/flamingo/assets/data/Robots/Flamingo/flamingo_rev03_1_1/config.yaml
+	scripts/__init__.py
+	scripts/co_rl/__init__.py
+	"\344\274\240\350\276\223\347\254\224\350\256\260.txt"
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/lab/flamingo/assets/data/Robots/Flamingo/flamingo_rev01_5_2/flamingo_rev01_5_2_merge_joints.zip b/lab/flamingo/assets/data/Robots/Flamingo/flamingo_rev01_5_2/flamingo_rev01_5_2_merge_joints.zip
+deleted file mode 100644
+index 9b0468f..0000000
+Binary files a/lab/flamingo/assets/data/Robots/Flamingo/flamingo_rev01_5_2/flamingo_rev01_5_2_merge_joints.zip and /dev/null differ
+diff --git a/lab/flamingo/tasks/manager_based/locomotion/position/mdp/terminations.py b/lab/flamingo/tasks/manager_based/locomotion/position/mdp/terminations.py
+index 334b65e..f6f872c 100644
+--- a/lab/flamingo/tasks/manager_based/locomotion/position/mdp/terminations.py
++++ b/lab/flamingo/tasks/manager_based/locomotion/position/mdp/terminations.py
+@@ -30,7 +30,8 @@ def terrain_out_of_bounds(
+     to the edge of the terrain is calculated based on the size of the terrain and the distance buffer.
+     """
+     if env.scene.cfg.terrain.terrain_type == "plane":
+-        return False  # we have infinite terrain because it is a plane
++        # use a tensor so downstream logic expecting per-env tensors keeps working on planes
++        return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+     elif env.scene.cfg.terrain.terrain_type == "generator":
+         # obtain the size of the sub-terrains
+         terrain_gen_cfg = env.scene.terrain.cfg.terrain_generator
+diff --git a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/agents/co_rl_cfg.py b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/agents/co_rl_cfg.py
+index 7e51958..e7b3bad 100644
+--- a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/agents/co_rl_cfg.py
++++ b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/agents/co_rl_cfg.py
+@@ -36,7 +36,7 @@ class FlamingoPPORunnerCfg(CoRlPolicyRunnerCfg):
+         entropy_coef=0.01,
+         num_learning_epochs=5,
+         num_mini_batches=4,
+-        learning_rate=1.0e-3,
++        learning_rate=1.0e-4,
+         schedule="adaptive",
+         gamma=0.99,
+         lam=0.95,
+diff --git a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/flat_env_track_jump_cfg.py b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/flat_env_track_jump_cfg.py
+index 13ec00a..64ef6bc 100644
+--- a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/flat_env_track_jump_cfg.py
++++ b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/flat_env_track_jump_cfg.py
+@@ -22,7 +22,7 @@ from lab.flamingo.assets.flamingo.flamingo_rev01_5_2 import FLAMINGO_CFG  # isor
+ class FlamingocommandsCfg(CommandsCfg):
+     event = mdp.EventCommandCfg(
+         asset_name="robot",
+-        resampling_time_range=(3.0, 5.0),
++        resampling_time_range=(7.0, 8.0),
+         rel_standing_envs=0.1,
+         event_during_time=1.2,
+         debug_vis=True,
+@@ -74,10 +74,43 @@ class FlamingoRewardsCfg():
+         }
+     )
+ 
++    leg_retraction_event = RewTerm(
++        func=mdp_jump.leg_retraction_event,
++        weight=15.0,
++        params={
++            "event_command_name": "event",
++            "event_time_range": (0.3, 0.8),
++            "asset_cfg": SceneEntityCfg("robot"),
++        }
++    )
++
++    # 跳跃成功完成奖励（重要！）
++    jump_complete_event = RewTerm(
++        func=mdp_jump.RewardCompleteEvent,
++        weight=1.0,  
++        params={
++            "event_command_name": "event",
++            "asset_cfg": SceneEntityCfg("robot"),
++            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_wheel_link"),
++        }
++    )
++
+     wheel_action_zero_event = RewTerm(func=mdp_jump.wheel_action_zero_event, weight=-0.01)
+ 
++    # 不跳跃惩罚（强制跳跃）
++    no_jump_penalty = RewTerm(
++        func=mdp_jump.penalty_no_jump_event,
++        weight=-20.0,  
++        params={
++            "event_command_name": "event",
++            "event_time_range": (0.3, 0.8),
++            "min_jump_height": 0.55,
++            "asset_cfg": SceneEntityCfg("robot"),
++        }
++    )
++
+     # -- Penalites
+-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-500.0)
++    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-100.0)
+ 
+     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_link_l2, weight=-0.05)
+ 
+@@ -166,6 +199,8 @@ class FlamingoFlatEnvCfg(LocomotionVelocityFlatEnvCfg):
+         self.observations.none_stack_critic.base_height_scan = None
+         self.observations.none_stack_critic.left_wheel_height_scan = None
+         self.observations.none_stack_critic.right_wheel_height_scan = None
++        self.observations.none_stack_critic.height_scan = None
++        self.observations.none_stack_critic.lift_mask = None
+         #! ********************************************************* !#
+ 
+         # observations
+@@ -223,9 +258,9 @@ class FlamingoFlatEnvCfg(LocomotionVelocityFlatEnvCfg):
+         # terminations
+         self.terminations.base_contact.params["sensor_cfg"].body_names = [
+             "base_link",
+-            ".*_hip_link",
+-            ".*_shoulder_link",
+-            ".*_leg_link",
++            #".*_hip_link",
++            #".*_shoulder_link",
++            #".*_leg_link",
+         ]
+ 
+ 
+@@ -242,6 +277,10 @@ class FlamingoFlatEnvCfg_PLAY(FlamingoFlatEnvCfg):
+         # scene
+         self.scene.robot = FLAMINGO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+ 
++        self.commands.event.resampling_time_range = (5.0, 6.0)  # 5-6秒跳一次
++        self.commands.event.rel_standing_envs = 0.0             # 所有环境都跳
++        self.commands.event.event_during_time = 1.2             # 跳跃持续1.2秒
++
+         # observations
+         #! ****************** Observations setup ******************* !#
+         self.observations.stack_policy.enable_corruption = False
+@@ -287,7 +326,7 @@ class FlamingoFlatEnvCfg_PLAY(FlamingoFlatEnvCfg):
+         # terminations
+         self.terminations.base_contact.params["sensor_cfg"].body_names = [
+             "base_link",
+-            ".*_hip_link",
+-            ".*_shoulder_link",
+-            ".*_leg_link",
++            #".*_hip_link",
++            #".*_shoulder_link",
++            #".*_leg_link",
+         ]
+diff --git a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/jump_rewards.py b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/jump_rewards.py
+index dc6ba3e..f4c0536 100644
+--- a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/jump_rewards.py
++++ b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/flat_env/track_jump/jump_rewards.py
+@@ -313,4 +313,76 @@ def over_height(
+     penalty = torch.where(current_height > max_height, torch.ones_like(current_height), torch.zeros_like(current_height))
+     event_command = env.command_manager.get_command(event_command_name)
+ 
+-    return penalty * event_command[:,0]
+\ No newline at end of file
++    return penalty * event_command[:,0]
++
++def penalty_no_jump_event(
++    env: ManagerBasedRLEnv,
++    event_command_name: str = "event",
++    event_time_range: tuple = (0.3, 0.8),
++    min_jump_height: float = 0.55,
++    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
++) -> torch.Tensor:
++    """惩罚在跳跃窗口期间没有跳跃的行为
++    
++    如果event激活且在跳跃时间窗口，但机器人高度不够，就给予惩罚
++    """
++    event_command = env.command_manager.get_command(event_command_name)
++    event_time = event_command[:, 1]
++    event_active = event_command[:, 0]
++    
++    asset: RigidObject = env.scene[asset_cfg.name]
++    current_height = asset.data.root_pos_w[:, 2]
++    
++    # 在跳跃窗口内
++    in_jump_window = torch.logical_and(
++        event_time >= event_time_range[0], 
++        event_time <= event_time_range[1]
++    ).float()
++    
++    # 没有跳到足够高度
++    not_jumping = (current_height < min_jump_height).float()
++    
++    # 惩罚：event激活 + 在窗口内 + 没跳
++    penalty = event_active * in_jump_window * not_jumping
++    
++    return penalty
++
++def leg_retraction_event(
++    env: ManagerBasedRLEnv,
++    event_command_name: str = "event",
++    event_time_range: tuple = (0.3, 0.8),
++    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
++) -> torch.Tensor:
++    """跳跃时双腿回收奖励（类似收腹跳）
++    
++    在跳跃阶段，奖励轮子（腿）相对基座的垂直距离减小，即收腿动作。
++    """
++    
++    event_command = env.command_manager.get_command(event_command_name)
++    event_time = event_command[:, 1]
++    
++    asset: Articulation = env.scene[asset_cfg.name]
++    pos = asset.data.body_pos_w
++    
++    # 获取基座和轮子的位置
++    base_id = asset.find_bodies("base_link")[0]
++    wheel_ids = asset.find_bodies(".*wheel_link")[0]
++    
++    base_z = pos[:, base_id, 2].squeeze(-1)  # shape: (N,) - 添加squeeze以确保形状正确
++    wheel_z = pos[:, wheel_ids, 2]  # shape: (N, 2)
++    
++    # 计算轮子相对于基座的垂直距离（收腿时这个值应该减小）
++    height_diff = base_z.unsqueeze(-1) - wheel_z  # shape: (N, 2)
++    avg_height_diff = height_diff.mean(dim=1)  # shape: (N,)
++    
++    # 跳跃阶段判断
++    jump_phase = torch.logical_and(
++        event_time >= event_time_range[0], 
++        event_time <= event_time_range[1]
++    ).float()
++    
++    # 奖励较小的高度差（即收腿），使用负高度差作为奖励
++    # 目标：height_diff 越小越好（收腿）
++    reward = -avg_height_diff * jump_phase * event_command[:, 0]
++    
++    return reward
+\ No newline at end of file
+diff --git a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/velocity_env_cfg.py b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/velocity_env_cfg.py
+index ac742de..297d318 100644
+--- a/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/velocity_env_cfg.py
++++ b/lab/flamingo/tasks/manager_based/locomotion/velocity/flamingo_env/velocity_env_cfg.py
+@@ -541,7 +541,7 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
+     def __post_init__(self):
+         """Post initialization."""
+         # general settings
+-        self.decimation = 4
++        self.decimation = 2
+         self.episode_length_s = 20.0
+         # simulation settings
+         self.sim.dt = 0.005
+@@ -601,7 +601,7 @@ class LocomotionVelocityFlatEnvCfg(ManagerBasedRLEnvCfg):
+     def __post_init__(self):
+         """Post initialization."""
+         # general settings
+-        self.decimation = 4
++        self.decimation = 2
+         self.episode_length_s = 20.0
+         # simulation settings
+         self.sim.dt = 0.005
+diff --git a/lab/flamingo/tasks/manager_based/locomotion/velocity/mdp/terminations.py b/lab/flamingo/tasks/manager_based/locomotion/velocity/mdp/terminations.py
+index 334b65e..f6f872c 100644
+--- a/lab/flamingo/tasks/manager_based/locomotion/velocity/mdp/terminations.py
++++ b/lab/flamingo/tasks/manager_based/locomotion/velocity/mdp/terminations.py
+@@ -30,7 +30,8 @@ def terrain_out_of_bounds(
+     to the edge of the terrain is calculated based on the size of the terrain and the distance buffer.
+     """
+     if env.scene.cfg.terrain.terrain_type == "plane":
+-        return False  # we have infinite terrain because it is a plane
++        # use a tensor so downstream logic expecting per-env tensors keeps working on planes
++        return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+     elif env.scene.cfg.terrain.terrain_type == "generator":
+         # obtain the size of the sub-terrains
+         terrain_gen_cfg = env.scene.terrain.cfg.terrain_generator
